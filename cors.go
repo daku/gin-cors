@@ -6,6 +6,7 @@ A Default Config for example is below:
 
 	cors.Config{
 		Origins:        "*",
+		OriginMatcher:  func(string) bool
 		Methods:        "GET, PUT, POST, DELETE",
 		RequestHeaders: "Origin, Authorization, Content-Type",
 		ExposedHeaders: "",
@@ -54,6 +55,8 @@ type Config struct {
 	Origins string
 	origins []string
 
+	OriginMatcher func(string,*gin.Context) bool
+
 	// This are the headers that the resource supports, and will accept in the request.
 	// Default is "Authorization".
 	RequestHeaders string
@@ -83,9 +86,11 @@ type Config struct {
 }
 
 // One time, do the conversion from our the public facing Configuration,
-// to all the formats we use internally strings for headers.. slices for looping
+// to all the formats we use internally strings for headers.. slices for
 func (config *Config) prepare() {
-	config.origins = strings.Split(config.Origins, ", ")
+	if config.Origins != "" {
+		config.origins = strings.Split(config.Origins, ", ")
+	}
 	config.methods = strings.Split(config.Methods, ", ")
 	config.requestHeaders = strings.Split(config.RequestHeaders, ", ")
 	config.maxAge = fmt.Sprintf("%.f", config.MaxAge.Seconds())
@@ -106,8 +111,9 @@ to set the correct CORS headers.  It accepts a cors.Options struct for configura
 func Middleware(config Config) gin.HandlerFunc {
 	forceOriginMatch := false
 
-	if config.Origins == "" {
-		panic("You must set at least a single valid origin. If you don't want CORS, to apply, simply remove the middleware.")
+	if config.Origins == "" && config.OriginMatcher == nil {
+		panic(`You must set at least a single valid origin or provide an origin matching function.
+			If you don't want CORS, to apply, simply remove the middleware.`)
 	}
 
 	if config.Origins == "*" {
@@ -130,7 +136,12 @@ func Middleware(config Config) gin.HandlerFunc {
 
 		originMatch := false
 		if !forceOriginMatch {
-			originMatch = matchOrigin(currentOrigin, config)
+			if len(config.origins) > 0 {
+				originMatch = matchOrigin(currentOrigin, config)
+			}
+			if !originMatch && config.OriginMatcher != nil {
+				originMatch = config.OriginMatcher(currentOrigin, context)
+			}
 		}
 
 		if forceOriginMatch || originMatch {
